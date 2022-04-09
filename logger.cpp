@@ -150,7 +150,7 @@ int Logger::traceChild(pid_t trace_pid)
             switch (orig_eax)
             {
             case -1:
-                printf("%s\n", strerror(errno));
+                perror("ptrace PTRACE_PEEKUSER error");
                 break;
             case SYS_write:
                 printf("SYS_write %ld\n", orig_eax);
