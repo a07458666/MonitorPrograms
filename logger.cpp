@@ -11,6 +11,10 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <fcntl.h>  
+#include <sys/ptrace.h>
+#include <sys/syscall.h>
+#include <sys/reg.h>
+// #include <sys/user.h>
 
 #define ERR -1
 
@@ -90,6 +94,111 @@ int Logger::getDirList(std::string path, std::vector<std::string> &dirlist)
     return 0;
 }
 
+int Logger::getEax(pid_t trace_pid, int &insyscall)
+{
+    long params[3];
+    long eax;
+
+    if(insyscall == 0) 
+    {
+        /* Syscall entry */
+        insyscall = 1;
+        params[0] = ptrace(PTRACE_PEEKUSER,
+                        trace_pid, 8 * RBX,
+                        NULL);
+        params[1] = ptrace(PTRACE_PEEKUSER,
+                        trace_pid, 8 * RCX,
+                        NULL);
+        params[2] = ptrace(PTRACE_PEEKUSER,
+                        trace_pid, 8 * RDX,
+                        NULL);
+        printf("Write called with %ld, %lx, %ld\n", params[0], params[1], params[2]);
+    }
+    else
+    { 
+        /* Syscall exit */
+        eax = ptrace(PTRACE_PEEKUSER, trace_pid, 8 * RAX, NULL);
+        printf("Write returned with %ld\n", eax);
+        insyscall = 0;
+    }
+}
+
+
+int Logger::traceChild(pid_t trace_pid)
+{
+    int wstatus;
+    long orig_eax, eax;
+    // long original_rax;
+    int insyscall = 0;
+    int insyscall_open = 0;
+    int insyscall_close = 0;
+
+    int ret = 0;
+    // struct user* user_space = (struct user*)0;
+
+    // ptrace(PTRACE_ATTACH, trace_pid, NULL, NULL);
+    while(waitpid(trace_pid, &wstatus, 0))
+    {
+        if (WIFEXITED(wstatus)){
+            printf("child exits\n");
+            return 0;
+        }
+        else if(WIFSTOPPED(wstatus)){
+            orig_eax = ptrace(PTRACE_PEEKUSER, trace_pid, 8 * ORIG_RAX, NULL);
+            // original_rax = ptrace(PTRACE_PEEKUSER, trace_pid, &user_space->regs.orig_rax, NULL);
+            printf("orig_eax %ld\n", orig_eax);
+            switch (orig_eax)
+            {
+            case -1:
+                printf("%s\n", strerror(errno));
+                break;
+            case SYS_write:
+                printf("SYS_write %ld\n", orig_eax);
+                ret = getEax(trace_pid, insyscall);
+                break;
+            case SYS_open:
+                printf("SYS_open %ld\n", orig_eax); 
+                ret = getEax(trace_pid, insyscall_open);
+                break;
+            case SYS_close:
+                printf("SYS_close %ld\n", orig_eax); 
+                ret = getEax(trace_pid, insyscall_close);
+                break;
+            default:
+                break;
+            }
+            // if(orig_eax == SYS_write) {
+            //     if(insyscall == 0) 
+            //     {
+            //         /* Syscall entry */
+            //         insyscall = 1;
+            //         params[0] = ptrace(PTRACE_PEEKUSER,
+            //                         trace_pid, 8 * RBX,
+            //                         NULL);
+            //         params[1] = ptrace(PTRACE_PEEKUSER,
+            //                         trace_pid, 8 * RCX,
+            //                         NULL);
+            //         params[2] = ptrace(PTRACE_PEEKUSER,
+            //                         trace_pid, 8 * RDX,
+            //                         NULL);
+            //         printf("Write called with %ld, %ld, %ld\n", params[0], params[1], params[2]);
+            //     }
+            //     else
+            //     { 
+            //         /* Syscall exit */
+            //         eax = ptrace(PTRACE_PEEKUSER, trace_pid, 8 * RAX, NULL);
+            //         printf("Write returned with %ld\n", eax);
+            //         insyscall = 0;
+            //     }
+            // }
+            ptrace(PTRACE_SYSCALL, trace_pid, NULL, NULL);
+            // ptrace(PTRACE_CONT, trace_pid, NULL, NULL);
+        }
+    }
+    // ptrace(PTRACE_CONT, trace_pid, NULL, NULL);
+    return 0;   
+}
+
 int Logger::run(int cmdId, char* argv[])
 {
     pid_t pid; 
@@ -102,19 +211,15 @@ int Logger::run(int cmdId, char* argv[])
         else if (pid == 0)
         {
             //child
-            printf("child pid %d getpid %d\n", pid, getpid());
+            printf("[child]pid %d getpid %d\n", pid, getpid());
+            ptrace(PTRACE_TRACEME, 0, NULL, NULL);
             execvp(argv[cmdId], &argv[cmdId]);
         }
         else
         {
             //parent
-            printf("parent pid %d getpid %d\n", pid, getpid());
-            int wstatus;
-            while(waitpid(pid, &wstatus, WNOHANG) != -1)
-            {
-                sleep(1);
-                printf("run\n");
-            }
+            printf("[parent]child pid %d getpid %d\n", pid, getpid());
+            int ret = traceChild(pid);
         }
     }
     catch(const std::exception& e)

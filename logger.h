@@ -21,6 +21,8 @@ class Logger{
         int readFileToVector(std::string filePath, std::vector<std::string> &datas);
         bool isNumber(const std::string& str);
         int createIOFile(std::string outputToFile);
+        int traceChild(pid_t pid);
+        int getEax(pid_t trace_pid, int &insyscall);
         int m_fdFile;
         int m_fdIO;
     public:
