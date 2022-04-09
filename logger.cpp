@@ -112,7 +112,7 @@ int Logger::getEax(pid_t trace_pid, int &insyscall)
         params[2] = ptrace(PTRACE_PEEKUSER,
                         trace_pid, 8 * RDX,
                         NULL);
-        printf("Write called with %ld, %lx, %ld\n", params[0], params[1], params[2]);
+        printf("[logger] called with %ld, %lx, %ld\n", params[0], params[1], params[2]);
     }
     else
     { 
@@ -132,7 +132,8 @@ int Logger::traceChild(pid_t trace_pid)
     int insyscall = 0;
     int insyscall_open = 0;
     int insyscall_close = 0;
-
+    int insyscall_chmod = 0;
+    int insyscall_openat = 0;
     int ret = 0;
     // struct user* user_space = (struct user*)0;
 
@@ -164,6 +165,13 @@ int Logger::traceChild(pid_t trace_pid)
                 printf("SYS_close %ld\n", orig_eax); 
                 ret = getEax(trace_pid, insyscall_close);
                 break;
+            case SYS_chmod:
+                printf("SYS_chmod %ld\n", orig_eax); 
+                ret = getEax(trace_pid, insyscall_chmod);
+                break;
+            case SYS_openat:
+                printf("SYS_openat %ld\n", orig_eax);
+                ret = getEax(trace_pid, insyscall_openat);
             default:
                 break;
             }
