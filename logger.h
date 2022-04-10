@@ -22,9 +22,18 @@ class Logger{
         bool isNumber(const std::string& str);
         int createIOFile(std::string outputToFile);
         int traceChild(pid_t pid);
-        int getEax(pid_t trace_pid, int &insyscall);
+        int sysWrite(pid_t trace_pid, int &insyscall);
+        int sysOpenat(pid_t trace_pid, int &insyscall);
+        int sysClose(pid_t trace_pid, int &insyscall);
+        void reverse(pid_t pid, long addr, int len);
+        void getMsg(pid_t pid, long addr, int len, std::string &msg);
+        void getMsg(pid_t pid, long addr, std::string &msg);
+        int getFd(pid_t pid, int fd, std::string &link);
+        int getLink(std::string path, std::string &link);
+        int rw2str(long rw, std::string &rwStr);
         int m_fdFile;
         int m_fdIO;
+        long m_params[6];
     public:
         Logger(std::string outputToFile, std::string loggerPath);
         ~Logger();
