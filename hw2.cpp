@@ -3,6 +3,7 @@
 #include <string>
 #include <cstring>
 #include <getopt.h>
+#include <dlfcn.h>
 
 #include "logger.h"
 
@@ -20,6 +21,7 @@ int GetOpt(int argc, char* argv[],
         case 'o':
             // print output to file, print to "stderr" if no file specified
             outputToFile = optarg;
+            // dlopen(outputToFile.c_str(), RTLD_LAZY);
             break;
         case 'p':
             // set the path to logger.so, default = ./logger.so
@@ -60,7 +62,7 @@ int main(int argc, char* argv[]){
     std::string outputToFile = "", loggerPath = "";
     if (argc == 1)
     {
-        printf("no command given.\n");
+        fprintf(stderr, "no command given.\n");
         exit(EXIT_FAILURE);
     }
     int cmdId = GetCmd(argc, argv);
