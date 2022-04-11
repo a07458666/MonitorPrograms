@@ -4,9 +4,13 @@
 #include <cstring>
 #include <getopt.h>
 #include <dlfcn.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
-#include "logger.h"
-
+#define PATH_MAX 1024
 int GetOpt(int argc, char* argv[], 
         std::string &outputToFile,
         std::string &loggerPath)
@@ -58,8 +62,20 @@ int GetCmd(int argc, char* argv[])
     return cmdId;
 }
 
+int createIOFile(std::string outputToFile){
+    int fdIO = 1;
+    int fdErr = 2;
+    int fdFile = open(outputToFile.c_str(), O_RDWR|O_CREAT, S_IRWXU|S_IRWXG|S_IRWXO);
+    if (fdFile != -1)
+    {
+        // dup2(fdFile, fdIO);
+        dup2(fdFile, fdErr);
+    }
+    return fdFile;
+}
+
 int main(int argc, char* argv[]){
-    std::string outputToFile = "", loggerPath = "";
+    std::string outputToFile = "", loggerPath = "./logger.so";
     if (argc == 1)
     {
         fprintf(stderr, "no command given.\n");
@@ -70,7 +86,40 @@ int main(int argc, char* argv[]){
         int err = GetOpt(argc, argv, outputToFile, loggerPath);
         if (err == -1) return err;    
     }
-    Logger logger(outputToFile, loggerPath);
-    logger.run(cmdId, argv);
+
+    if (outputToFile != "")
+    {
+        int fdFile = createIOFile(outputToFile);
+    }
+
+    pid_t pid; 
+
+    if ((pid = fork()) < 0)
+    {
+        perror("fork fail");
+    }
+    else if (pid == 0)
+    {
+        //child
+        // printf("[child]pid %d getpid %d\n", pid, getpid());
+        char path[1024];
+        sprintf(path, "LD_PRELOAD=%s", loggerPath.c_str());
+        char * const envp[] = {path,  NULL};
+        execvpe(argv[cmdId], &argv[cmdId], envp);
+    }
+    else
+    {
+        //parent
+        // printf("[parent]child pid %d getpid %d\n", pid, getpid());
+        // int ret = traceChild(pid);
+        int wstatus;
+        while(waitpid(pid, &wstatus, 0))
+        {
+            if (WIFEXITED(wstatus)){
+                // printf("child exits\n");
+                return 0;
+            }
+        }
+    }
     return 0;
 }
