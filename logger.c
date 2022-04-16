@@ -4,13 +4,23 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <string.h>
 
 #define PATH_MAX 1024
+#define LOGGER_FD 3
+#define MAX_BUF_SIZE 32
+static FILE * logger_out = NULL;
+FILE *getLoggerFile(){
+  if (logger_out == NULL){
+    logger_out = fdopen(LOGGER_FD, "w");
+  }
+  return logger_out;
+}
 
 int fileToPath(FILE *stream, char *filename)
 {
-    int MAXSIZE = 0xFFF;
-    char proclnk[0xFFF];
+    char proclnk[PATH_MAX] = "";
     int fno;
     ssize_t r;
 
@@ -19,7 +29,7 @@ int fileToPath(FILE *stream, char *filename)
     {
         fno = fileno(stream);
         sprintf(proclnk, "/proc/self/fd/%d", fno);
-        r = readlink(proclnk, filename, MAXSIZE);
+        r = readlink(proclnk, filename, PATH_MAX);
         if (r < 0)
         {
             printf("failed to readlink\n");
@@ -34,8 +44,7 @@ int fileToPath(FILE *stream, char *filename)
 
 int fdToPath(int fno, char *filename)
 {
-    int MAXSIZE = 0xFFF;
-    char proclnk[0xFFF];
+    char proclnk[PATH_MAX] = "";
     ssize_t r;
     // fno = fno -2;
     // test.txt created earlier
@@ -43,15 +52,21 @@ int fdToPath(int fno, char *filename)
     {
         sprintf(proclnk, "/proc/self/fd/%d", fno);
         // printf("proclnk %s\n", proclnk);
-        r = readlink(proclnk, filename, MAXSIZE);
+        r = readlink(proclnk, filename, PATH_MAX);
         if (r < 0)
         {
             printf("failed to readlink\n");
             exit(1);
         }
         filename[r] = '\0';
+        // printf("proclnk %ld, %s\n", r, filename);
         // printf("stream -> fno -> filename: %p -> %d -> %s\n",
         //         stream, fno, filename);
+    }
+    else
+    {
+      filename = "";
+      return -1;
     }
     return 0;
 }
@@ -63,30 +78,53 @@ void getRealPath(const char * pathname, char * real)
   return;
 }
 
-static uid_t (*old_getuid)(void) = NULL; /* function pointer */
-uid_t getuid(void)
+void checkBuf(const char * buf, char * newBuff)
 {
-  if(old_getuid == NULL)
+  for (int i = 0; i < strlen(buf); ++i)
   {
-    void *handle = dlopen("libc.so.6", RTLD_LAZY);
- 
-    if(handle != NULL)
-      old_getuid = dlsym(handle, "getuid");
+    if (i >= MAX_BUF_SIZE)
+    {
+      newBuff[i] = '\0';
+      break;
+    } 
+    // fprintf(getLoggerFile(), "[buf] isprint =%c %d\n",buf[i], isprint(buf[i]));
+    if (isprint(buf[i]) == 0)
+    {
+      newBuff[i] = '.';
+    }
+    else
+    {
+      newBuff[i] = buf[i];
+    }
   }
- 
-  fprintf(stderr, "[logger]getuid\n");
- 
-  if(old_getuid != NULL){
-    // fprintf(stderr, "real uid = %d\n", old_getuid());
-    return old_getuid();
-  }
-  return 0;
+  // int af_length = strlen(buf);
+  // fprintf(getLoggerFile(), "[buf] checkBuf(\"%s\", %d, %d)\n", (char *)buf, length, af_length);
 }
+
+// static uid_t (*old_getuid)(void) = NULL; /* function pointer */
+// uid_t getuid(void)
+// {
+//   if(old_getuid == NULL)
+//   {
+//     void *handle = dlopen("libc.so.6", RTLD_LAZY);
+ 
+//     if(handle != NULL)
+//       old_getuid = dlsym(handle, "getuid");
+//   }
+ 
+//   fprintf(getLoggerFile(), "[logger]getuid\n");
+ 
+//   if(old_getuid != NULL){
+//     // fprintf(getLoggerFile(), "real uid = %d\n", old_getuid());
+//     return old_getuid();
+//   }
+//   return 0;
+// }
 
 static FILE * (*old_fopen)(const char *, const char *) = NULL; /* function pointer */
 FILE *fopen(const char *pathname, const char *mode)
 {
-  char realPath[PATH_MAX];
+  char realPath[PATH_MAX] = "";
   if(old_fopen == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -95,10 +133,10 @@ FILE *fopen(const char *pathname, const char *mode)
       old_fopen = dlsym(handle, "fopen");
   }
   if(old_fopen != NULL){
-    // fprintf(stderr, "real fopen = %p\n", old_fopen(pathname, mode));
+    // fprintf(getLoggerFile(), "real fopen = %p\n", old_fopen(pathname, mode));
     getRealPath(pathname, realPath);
     FILE * f = old_fopen(pathname, mode);
-    fprintf(stderr, "[logger] fopen(\"%s\", \"%s\") = %p\n", realPath, mode, f);
+    fprintf(getLoggerFile(), "[logger] fopen(\"%s\", \"%s\") = %p\n", realPath, mode, f);
     return f;
   }
   return 0;
@@ -115,12 +153,10 @@ int fclose(FILE *stream)
       old_fclose = dlsym(handle, "fclose");
   }
   if(old_fclose != NULL){
-    char filename[0xFFF];
+    char filename[PATH_MAX] = "";
     fileToPath(stream, filename);
-    if (stream == stderr) fprintf(stderr, "[logger] fclose(\"%s\") = 0\n", filename);
-    // fprintf(stderr, "[stderr] %p %p", stream, stderr);
     int ret = old_fclose(stream);
-    fprintf(stderr, "[logger] fclose(\"%s\") = %d\n", filename, ret);
+    fprintf(getLoggerFile(), "[logger] fclose(\"%s\") = %d\n", filename, ret);
     return ret;
   }
   return 0;
@@ -129,7 +165,8 @@ int fclose(FILE *stream)
 static size_t (*old_fwrite)(const void *, size_t, size_t, FILE *) = NULL; /* function pointer */
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-  char filename[0xFFF];
+  char filename[PATH_MAX] = "";
+  char newBuf[MAX_BUF_SIZE];
   if(old_fwrite == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -140,7 +177,8 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
   if(old_fwrite != NULL){
     fileToPath(stream, filename);
     size_t ret = old_fwrite(ptr, size, nmemb, stream);
-    fprintf(stderr, "[logger] fwrite(\"%s\", %ld, %ld, \"%s\") = %ld\n", (char *)ptr, size, nmemb, filename, ret);
+    checkBuf((char *)ptr, newBuf);
+    fprintf(getLoggerFile(), "[logger] fwrite(\"%s\", %ld, %ld, \"%s\") = %ld\n", (char *)newBuf, size, nmemb, filename, ret);
     return ret;
   }
   return 0;
@@ -158,7 +196,7 @@ int chmod(const char *pathname, mode_t mode)
   }
   if(old_chmod != NULL){
     int ret = old_chmod(pathname, mode);
-    fprintf(stderr, "[logger] chmod(\"%s\", %o) = %d\n", pathname, mode, ret);
+    fprintf(getLoggerFile(), "[logger] chmod(\"%s\", %o) = %d\n", pathname, mode, ret);
     return ret;
   }
   return 0;
@@ -176,7 +214,7 @@ int creat(const char *pathname, mode_t mode)
   }
   if(old_creat != NULL){
     int ret = old_creat(pathname, mode);
-    fprintf(stderr, "[logger] creat(\"%s\", %o) = %d\n", pathname, mode, ret);
+    fprintf(getLoggerFile(), "[logger] creat(\"%s\", %o) = %d\n", pathname, mode, ret);
     return ret;
   }
   return 0;
@@ -194,7 +232,7 @@ int chown(const char *pathname, uid_t owner, gid_t group)
   }
   if(old_chown != NULL){
     int ret = old_chown(pathname, owner, group);
-    fprintf(stderr, "[logger] chown(\"%s\", %d, %d) = %d\n", pathname, owner, group, ret);
+    fprintf(getLoggerFile(), "[logger] chown(\"%s\", %d, %d) = %d\n", pathname, owner, group, ret);
     return ret;
   }
   return 0;
@@ -212,7 +250,7 @@ int rename(const char *oldpath, const char *newpath)
   }
   if(old_rename != NULL){
     int ret = old_rename(oldpath, newpath);
-    fprintf(stderr, "[logger] rename(\"%s\", \"%s\") = %d\n", oldpath, newpath, ret);
+    fprintf(getLoggerFile(), "[logger] rename(\"%s\", \"%s\") = %d\n", oldpath, newpath, ret);
     return ret;
   }
   return 0;
@@ -230,7 +268,7 @@ int open(const char *pathname, int flags, mode_t mode)
   }
   if(old_open != NULL){
     int ret = old_open(pathname, flags, mode);
-    fprintf(stderr, "[logger] open(\"%s\", %o, %o) = %d\n", pathname, flags, mode, ret);
+    fprintf(getLoggerFile(), "[logger] open(\"%s\", %o, %o) = %d\n", pathname, flags, mode, ret);
     return ret;
   }
   return 0;
@@ -239,6 +277,7 @@ int open(const char *pathname, int flags, mode_t mode)
 static ssize_t (*old_write)(int, const void *, size_t) = NULL; /* function pointer */
 ssize_t write(int fd, const void *buf, size_t count)
 {
+  char newBuf[MAX_BUF_SIZE];
   if(old_write == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -247,10 +286,11 @@ ssize_t write(int fd, const void *buf, size_t count)
       old_write = dlsym(handle, "write");
   }
   if(old_write != NULL){
-    char filename[0xFFF];
+    char filename[PATH_MAX] = "";
     fdToPath(fd, filename);
     int ret = old_write(fd, buf, count);
-    fprintf(stderr, "[logger] write(\"%s\", \"%s\", %ld) = %d\n", filename, (char *)buf, count, ret);
+    checkBuf((char *)buf, newBuf);
+    fprintf(getLoggerFile(), "[logger] write(\"%s\", \"%s\", %ld) = %d\n", filename, (char *)newBuf, count, ret);
     return ret;
   }
   return 0;
@@ -259,6 +299,7 @@ ssize_t write(int fd, const void *buf, size_t count)
 static ssize_t (*old_read)(int, const void *, size_t) = NULL; /* function pointer */
 ssize_t read(int fd, void *buf, size_t count)
 {
+  char newBuf[MAX_BUF_SIZE];
   if(old_read == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -267,10 +308,11 @@ ssize_t read(int fd, void *buf, size_t count)
       old_read = dlsym(handle, "read");
   }
   if(old_read != NULL){
-    char filename[0xFFF];
+    char filename[PATH_MAX] = "";
     fdToPath(fd, filename);
     int ret = old_read(fd, buf, count);
-    fprintf(stderr, "[logger] read(\"%s\", \"%s\", %ld) = %d\n", filename, (char *)buf, count, ret);
+    checkBuf((char *)buf, newBuf);
+    fprintf(getLoggerFile(), "[logger] read(\"%s\", \"%s\", %ld) = %d\n", filename, (char *)newBuf, count, ret);
     return ret;
   }
   return 0;
@@ -287,10 +329,10 @@ int close(int fd)
       old_close = dlsym(handle, "close");
   }
   if(old_close != NULL){
-    char filename[0xFFF];
+    char filename[PATH_MAX] = "";
     fdToPath(fd, filename);
     int ret = old_close(fd);
-    fprintf(stderr, "[logger] close(\"%s\") = %d\n", filename, ret);
+    fprintf(getLoggerFile(), "[logger] close(\"%s\") = %d\n", filename, ret);
     return ret;
   }
   return 0;
@@ -308,7 +350,7 @@ FILE * tmpfile(void)
   }
   if(old_tmpfile != NULL){
     FILE * ret = old_tmpfile();
-    fprintf(stderr, "[logger] tmpfile() = %p\n", ret);
+    fprintf(getLoggerFile(), "[logger] tmpfile() = %p\n", ret);
     return ret;
   }
   return 0;
@@ -317,7 +359,7 @@ FILE * tmpfile(void)
 static int (*old_remove)(const char *) = NULL; /* function pointer */
 int remove(const char *pathname)
 {
-  char realPath[PATH_MAX];
+  char realPath[PATH_MAX] = "";
   if(old_remove == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -328,7 +370,29 @@ int remove(const char *pathname)
   if(old_remove != NULL){
     getRealPath(pathname, realPath);
     int ret = old_remove(pathname);
-    fprintf(stderr, "[logger] remove(\"%s\") = %d\n",realPath, ret);
+    fprintf(getLoggerFile(), "[logger] remove(\"%s\") = %d\n",realPath, ret);
+    return ret;
+  }
+  return 0;
+}
+
+static int (*old_fread)(void *ptr, size_t, size_t, FILE *) = NULL; /* function pointer */
+size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
+{
+  char filename[PATH_MAX] = "";
+  char newBuf[MAX_BUF_SIZE] = "";
+  if(old_fwrite == NULL)
+  {
+    void *handle = dlopen("libc.so.6", RTLD_LAZY);
+ 
+    if(handle != NULL)
+      old_fwrite = dlsym(handle, "fread");
+  }
+  if(old_fwrite != NULL){
+    fileToPath(stream, filename);
+    size_t ret = old_fwrite(ptr, size, nmemb, stream);
+    checkBuf((char *)ptr, newBuf);
+    fprintf(getLoggerFile(), "[logger] fread(\"%s\", %ld, %ld, \"%s\") = %ld\n", (char *)newBuf, size, nmemb, filename, ret);
     return ret;
   }
   return 0;

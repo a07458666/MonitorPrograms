@@ -2,7 +2,7 @@ CC = gcc
 CXX = g++ -g -Wall
 CFLAGS = -g -Wall
 LDFLAGS = 
-PROGS = hw2 logger.so sample
+PROGS = hw2 logger.so
 
 all: $(PROGS)
 
