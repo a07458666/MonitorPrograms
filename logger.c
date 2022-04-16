@@ -78,9 +78,10 @@ void getRealPath(const char * pathname, char * real)
   return;
 }
 
-void checkBuf(const char * buf, char * newBuff)
+void checkBuf(const char * buf, char * newBuff, size_t len)
 {
-  for (int i = 0; i < strlen(buf); ++i)
+  // printf("%ld\n", len);
+  for (int i = 0; i < len; ++i)
   {
     if (i >= MAX_BUF_SIZE)
     {
@@ -166,7 +167,7 @@ static size_t (*old_fwrite)(const void *, size_t, size_t, FILE *) = NULL; /* fun
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
   char filename[PATH_MAX] = "";
-  char newBuf[MAX_BUF_SIZE];
+  char newBuf[MAX_BUF_SIZE] = "";
   if(old_fwrite == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -177,7 +178,7 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
   if(old_fwrite != NULL){
     fileToPath(stream, filename);
     size_t ret = old_fwrite(ptr, size, nmemb, stream);
-    checkBuf((char *)ptr, newBuf);
+    checkBuf((char *)ptr, newBuf, size * nmemb);
     fprintf(getLoggerFile(), "[logger] fwrite(\"%s\", %ld, %ld, \"%s\") = %ld\n", (char *)newBuf, size, nmemb, filename, ret);
     return ret;
   }
@@ -277,7 +278,7 @@ int open(const char *pathname, int flags, mode_t mode)
 static ssize_t (*old_write)(int, const void *, size_t) = NULL; /* function pointer */
 ssize_t write(int fd, const void *buf, size_t count)
 {
-  char newBuf[MAX_BUF_SIZE];
+  char newBuf[MAX_BUF_SIZE] = "";
   if(old_write == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -289,7 +290,7 @@ ssize_t write(int fd, const void *buf, size_t count)
     char filename[PATH_MAX] = "";
     fdToPath(fd, filename);
     int ret = old_write(fd, buf, count);
-    checkBuf((char *)buf, newBuf);
+    checkBuf((char *)buf, newBuf, count);
     fprintf(getLoggerFile(), "[logger] write(\"%s\", \"%s\", %ld) = %d\n", filename, (char *)newBuf, count, ret);
     return ret;
   }
@@ -299,7 +300,7 @@ ssize_t write(int fd, const void *buf, size_t count)
 static ssize_t (*old_read)(int, const void *, size_t) = NULL; /* function pointer */
 ssize_t read(int fd, void *buf, size_t count)
 {
-  char newBuf[MAX_BUF_SIZE];
+  char newBuf[MAX_BUF_SIZE] = "";
   if(old_read == NULL)
   {
     void *handle = dlopen("libc.so.6", RTLD_LAZY);
@@ -311,7 +312,7 @@ ssize_t read(int fd, void *buf, size_t count)
     char filename[PATH_MAX] = "";
     fdToPath(fd, filename);
     int ret = old_read(fd, buf, count);
-    checkBuf((char *)buf, newBuf);
+    checkBuf((char *)buf, newBuf, count);
     fprintf(getLoggerFile(), "[logger] read(\"%s\", \"%s\", %ld) = %d\n", filename, (char *)newBuf, count, ret);
     return ret;
   }
@@ -391,7 +392,7 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
   if(old_fwrite != NULL){
     fileToPath(stream, filename);
     size_t ret = old_fwrite(ptr, size, nmemb, stream);
-    checkBuf((char *)ptr, newBuf);
+    checkBuf((char *)ptr, newBuf, size * nmemb);
     fprintf(getLoggerFile(), "[logger] fread(\"%s\", %ld, %ld, \"%s\") = %ld\n", (char *)newBuf, size, nmemb, filename, ret);
     return ret;
   }
